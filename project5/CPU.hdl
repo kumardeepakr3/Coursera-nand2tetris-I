@@ -1,0 +1,89 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Put your code here:
+
+    // Parse Instruction type A or C
+    Not(in=instruction[15], out=IsATypeInstruction);
+    Not(in=IsATypeInstruction, out=IsCTypeInstruction);
+
+    // Set ALUOut goes to A if dest has A. i.e instruction[5] is 1 and it's ctype instruction
+    And(a=IsCTypeInstruction, b=instruction[5], out=IsAluOutToA);
+    // Choose between instruction and ALUOut pins
+    Mux16(a=instruction, b=ALUout, sel=IsAluOutToA, out=ARegIn);
+
+
+    // Load A if AType instruction or if IsAluOutToA
+    Or(a=IsATypeInstruction, b=IsAluOutToA, out=IsLoadA);
+    ARegister(in=ARegIn, load=IsLoadA, out=ARegout, out[0..14]=addressM);
+
+    // Choose between A or M is based on 'a' bit - 12th pos from right in Instruction
+    Mux16(a=ARegout, b=inM, sel=instruction[12], out=AluInX);
+
+
+    // Load D if CType instruction and if dest has D i.e. instruction[4] is 1
+    And(a=IsCTypeInstruction, b=instruction[4], out=ShouldLoadD);
+    DRegister(in=ALUout, load=ShouldLoadD, out=DRegOut);
+
+
+    // ALU code
+    ALU(x=DRegOut, y=AluInX, zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=ALUout, out=outM, zr=ALUOutIsZero, ng=ALUOutIsLessThanZero);
+    
+
+    // Set WriteM value i.e. Write to memory only if instruction[3] is enabled.
+    And(a=IsCTypeInstruction, b=instruction[3], out=writeM);
+
+
+    // Analyze outputValue
+    Not(in=ALUOutIsZero, out=ALUOutIsNonZero);
+    Not(in=ALUOutIsLessThanZero, out=ALUOutIsGreaterThanOrEqualToZero);
+    And(a=ALUOutIsGreaterThanOrEqualToZero, b=ALUOutIsNonZero, out=ALUOutIsGreaterThanZero);
+    Or(a=ALUOutIsLessThanZero, b=ALUOutIsZero, out=ALUOutIsLessThanOrEqualToZero);
+
+    // Select the output using this mux.
+    // a - null (no jump)
+    // h - Unconditional Jump
+    Mux8Way16(a=false, b[1..15]=false, b[0]=ALUOutIsGreaterThanZero, c[1..15]=false, c[0]=ALUOutIsZero, d[1..15]=false, d[0]=ALUOutIsGreaterThanOrEqualToZero, e[1..15]=false, e[0]=ALUOutIsLessThanZero, f[1..15]=false, f[0]=ALUOutIsNonZero, g[1..15]=false, g[0]=ALUOutIsLessThanOrEqualToZero, h=true, sel[0]=instruction[0], sel[1]=instruction[1], sel[2]=instruction[2], out=jumpOut);
+    And16(a[1..15]=false, a[0]=IsCTypeInstruction, b=jumpOut, out=outAnd, out[0]=ShouldLoadPC);
+
+    Not(in=ShouldLoadPC, out=ShouldIncrement);
+    PC(in=ARegout, load=ShouldLoadPC, inc=ShouldIncrement, reset=reset, out=PCOut, out[0..14]=pc);
+}
